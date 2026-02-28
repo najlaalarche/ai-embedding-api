@@ -1,28 +1,57 @@
-# 🤖 AI Embedding API
+# 🤖 AI Vector Search API
 
-A REST API built with **FastAPI** that generates and compares **AI sentence embeddings** using **Sentence-Transformers**.
+A production-style **FastAPI backend** that generates AI embeddings and performs **semantic vector search** using **Redis Stack (HNSW)**.
 
 ---
 
-## 📌 Project Objective
+## 🚀 Project Overview
 
-This project implements an intelligent API capable of:
+This project implements a real-world AI backend capable of:
 
-- Converting text into numerical vector representations (**embeddings**)
-- Automatically selecting the most appropriate AI model
-- Storing embeddings in memory
-- Comparing semantic similarity between texts
+- Converting text into numerical vector representations (embeddings)
+- Automatically selecting the most appropriate embedding model
+- Storing embeddings in Redis using FLOAT32 binary format
+- Creating HNSW vector indexes
+- Performing fast semantic similarity search (KNN)
+- Supporting multiple embedding dimensions
+
+This is not simple in-memory storage.  
+It uses a real **vector database architecture**.
+
+---
+
+## 🏗 Architecture
+
+
+User
+↓
+FastAPI
+↓
+SentenceTransformers
+↓
+Embedding (384 or 768 dim)
+↓
+FLOAT32 Conversion
+↓
+Redis HASH Storage
+↓
+HNSW Vector Index
+↓
+KNN Semantic Search
+
 
 ---
 
 ## 🛠 Technologies Used
 
-- **Python 3.11**
-- **FastAPI**
-- **Uvicorn**
-- **Sentence-Transformers**
-- **Postman**
-- **Swagger UI**
+- Python 3.11
+- FastAPI
+- Uvicorn
+- Sentence-Transformers
+- Redis Stack
+- NumPy
+- Swagger UI
+- Postman
 
 ---
 
@@ -30,33 +59,46 @@ This project implements an intelligent API capable of:
 
 The API uses two NLP embedding models:
 
-| Model | Purpose |
-|------|---------|
-| `paraphrase-multilingual-mpnet-base-v2` | General semantic similarity & sentence embeddings |
-| `multi-qa-MiniLM-L6-cos-v1` | Optimized for question-answer tasks |
+| Model | Dimension | Redis Index | Prefix | Purpose |
+|--------|------------|------------|------------|----------|
+| `multi-qa-MiniLM-L6-cos-v1` | 384 | `idx_minilm` | `minilm:` | Question-answer optimization |
+| `paraphrase-multilingual-mpnet-base-v2` | 768 | `idx_mpnet` | `mpnet:` | General semantic similarity |
+
+Each model uses a separate HNSW index due to different vector dimensions.
 
 ---
 
 ## ⚙️ Features
 
-✅ REST API design  
-✅ Automatic model selection  
-✅ Embedding generation  
-✅ Memory storage  
-✅ Cosine similarity computation  
-✅ Input validation  
-✅ Exception handling  
-✅ Swagger documentation  
-✅ Postman testing  
+- ✅ REST API design  
+- ✅ Automatic model detection  
+- ✅ FLOAT32 binary vector storage  
+- ✅ Redis HASH storage  
+- ✅ HNSW vector indexing  
+- ✅ Multi-index architecture  
+- ✅ KNN semantic similarity search  
+- ✅ Cosine distance metric  
+- ✅ Input validation  
+- ✅ Exception handling  
+- ✅ Swagger documentation  
 
 ---
 
-## 🚀 How to Run the Project
+## 🗄 Redis Setup (Required)
 
-### 1️⃣ Install dependencies
+This project requires **Redis Stack** (not plain Redis).
+
+After installing Redis Stack, create the vector indexes:
+
+### MiniLM (384 dimensions)
 
 ```bash
-pip install fastapi uvicorn sentence-transformers
+FT.CREATE idx_minilm ON HASH PREFIX 1 "minilm:" SCHEMA vector VECTOR HNSW 6 TYPE FLOAT32 DIM 384 DISTANCE_METRIC COSINE
+MPNet (768 dimensions)
+FT.CREATE idx_mpnet ON HASH PREFIX 1 "mpnet:" SCHEMA vector VECTOR HNSW 6 TYPE FLOAT32 DIM 768 DISTANCE_METRIC COSINE
+🚀 Running the Project
+1️⃣ Install dependencies
+pip install -r requirements.txt
 2️⃣ Start the server
 uvicorn main:app --reload
 3️⃣ Open API documentation
@@ -65,56 +107,47 @@ Swagger UI:
 
 http://127.0.0.1:8000/docs
 🔌 API Endpoints
-✅ Health Check
-GET /health
+✅ GET /health
 
-Response:
+Health check endpoint.
 
-{
-  "status": "API running"
-}
-✅ List Available Models
-GET /models
-✅ Generate Embedding
-POST /embed
+✅ GET /models
+
+Lists available models and index configuration.
+
+✅ POST /embed
+
+Generates embedding and stores it in Redis.
 
 Request:
 
 {
-  "text": "AI is amazing"
+  "text": "Machine learning is powerful"
 }
 
 Response:
 
 {
-  "text": "AI is amazing",
+  "text": "Machine learning is powerful",
   "model_used": "paraphrase-multilingual-mpnet-base-v2",
-  "vector": [...]
+  "vector_dim": 768,
+  "stored_key": "mpnet:Machine learning is powerful"
 }
-✅ Compare Text Similarity
-POST /compare
+✅ POST /similarity_search
+
+Performs KNN semantic search using Redis HNSW.
 
 Request:
 
 {
-  "text1": "AI is powerful",
-  "text2": "Artificial intelligence is strong"
+  "text": "What is machine learning?"
 }
 
-Response:
+Returns the most semantically similar stored texts.
 
-{
-  "similarity": 0.873
-}
-✅ View Stored Embeddings
-GET /memory
-🔍 Model Selection Logic
+✅ POST /compare
 
-The API automatically selects the model:
-
-If text contains ? → QA Model
-
-Otherwise → Paraphrase Model
+Computes cosine similarity directly between two texts.
 
 📐 Similarity Metric
 
@@ -124,39 +157,54 @@ Cosine Similarity
 
 Why?
 
-Measures angle between vectors
+Measures angular similarity
 
 Independent of vector magnitude
 
-Standard for embedding comparison
+Standard metric for embedding comparison
 
 ⚠️ Error Handling
 Scenario	HTTP Code
-Missing / Empty input	400 Bad Request
-Internal processing error	500 Internal Server Error
-Success	200 OK
-✅ Testing
-
-The API was tested using:
-
-Swagger UI
-
-Postman Collection
-
+Missing input	400
+Internal error	500
+Success	200
 🎯 Learning Outcomes
 
-✔ REST API design
-✔ GET vs POST
-✔ NLP embeddings
-✔ Cosine similarity
-✔ Model routing
-✔ Validation & exceptions
-✔ API testing workflow
+✔ Vector embeddings
+
+✔ Multi-model architecture
+
+✔ Redis Stack integration
+
+✔ HNSW indexing
+
+✔ FLOAT32 vector storage
+
+✔ KNN search
+
+✔ Semantic search backend design
+
+✔ Clean Git workflow
+
+✔ AI backend system architecture
 
 📚 Conclusion
 
-This project successfully integrates AI/NLP models into a functional API capable of embedding generation, storage, and semantic similarity analysis.
+This project demonstrates a complete AI vector search pipeline:
+
+Embedding generation
+
+Vector storage
+
+HNSW indexing
+
+Semantic similarity search
+
+Multi-model support
+
+It reflects a backend AI engineering architecture rather than a simple academic API.
 
 👩‍💻 Author
 
-Developed as part of an AI / NLP academic project.
+Developed as an AI backend engineering project integrating NLP models with vector database architecture.
+
