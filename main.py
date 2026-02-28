@@ -1,6 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer, util
+import numpy as np
+import redis
+
+
+
 
 app = FastAPI(
     title="AI Embedding API",
@@ -12,8 +17,7 @@ app = FastAPI(
 paraphrase_model = SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
 qa_model = SentenceTransformer("multi-qa-MiniLM-L6-cos-v1")
 
-# ✅ Memory storage
-memory = {}
+
 
 # ✅ Request schemas
 class TextInput(BaseModel):
@@ -23,6 +27,15 @@ class CompareInput(BaseModel):
     text1: str
     text2: str
 
+r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+@app.get("/redis-health")
+def redis_health():
+    return {"redis_alive": r.ping()}
+
+@app.post("/redis-test")
+def redis_test(data: TextInput):
+    r.set(data.text, "stored")
+    return {"message": "stored in redis"}
 
 # -----------------------------
 # ✅ GET /health
@@ -46,14 +59,6 @@ def list_models():
 
 
 # -----------------------------
-# ✅ GET /memory
-# -----------------------------
-@app.get("/memory")
-def get_memory():
-    return {"stored_embeddings": memory}
-
-
-# -----------------------------
 # ✅ POST /embed
 # -----------------------------
 @app.post("/embed")
@@ -70,21 +75,27 @@ def embed_text(data: TextInput):
         if "?" in text:
             model = qa_model
             model_used = "multi-qa-MiniLM-L6-cos-v1"
+            prefix = "minilm:"
         else:
             model = paraphrase_model
             model_used = "paraphrase-multilingual-mpnet-base-v2"
+            prefix = "mpnet:"
 
         # ✅ Generate embedding
-        vector = model.encode(text).tolist()
+        vector = model.encode(text)
+        vector_np = np.array(vector, dtype=np.float32)
+        vector_bytes = vector_np.tobytes()
 
         # ✅ Store in memory
-        memory[text] = vector
-
+        r.hset(f"{prefix}{text}", mapping={
+            "text": text,
+            "vector": vector_bytes
+        })
         # ✅ Response
         return {
             "text": text,
             "model_used": model_used,
-            "vector": vector
+            "vector": vector.tolist()
         }
 
     except Exception:
@@ -118,3 +129,39 @@ def compare_texts(data: CompareInput):
 
     except Exception:
         raise HTTPException(status_code=500, detail="Comparison failed")
+    
+@app.post("/similarity_search")
+def similarity_search(data: TextInput):
+
+    query = data.text.strip()
+
+    if not query:
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+    # 🔎 Detect model like /embed
+    if "?" in query:
+        model = qa_model
+        index_name = "idx_minilm"
+    else:
+        model = paraphrase_model
+        index_name = "idx_mpnet"
+
+    # Encode
+    vector = model.encode(query)
+    vector_np = np.array(vector, dtype=np.float32)
+    vector_bytes = vector_np.tobytes()
+
+    query_str = "*=>[KNN 3 @vector $vec AS score]"
+
+    results = r.execute_command(
+        "FT.SEARCH",
+        index_name,
+        query_str,
+        "PARAMS", 2,
+        "vec", vector_bytes,
+        "SORTBY", "score",
+        "RETURN", 2, "text", "score",
+        "DIALECT", 2
+    )
+
+    return {"results": results}
